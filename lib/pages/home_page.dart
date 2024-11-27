@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:weather_app/auth.dart';
 import 'package:weather/weather.dart';
 import 'package:weather_app/consts.dart';
+import 'package:dio/dio.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -35,18 +36,49 @@ class _HomePageState extends State<HomePage> {
   }
 
   // WEATHER VARIABLES:
-  final WeatherFactory _weatherFactory = WeatherFactory(OPENWEATHER_API_KEY);
+  final WeatherFactory _weatherFactory =
+      WeatherFactory(OPENWEATHER_API_KEY); //to se zaj vec ne uporablja
+  final TextEditingController _cityController = TextEditingController();
 
   Weather? _weather;
+  List<dynamic>? _forecast;
+
+  // API calls with DIO
+  final Dio _dio = Dio(BaseOptions(
+    baseUrl: "https://api.openweathermap.org/data/2.5/",
+    queryParameters: {"appId": OPENWEATHER_API_KEY, "units": "metric"},
+  ));
+
+  Future<void> fetchWeather(String city) async {
+    try {
+      final currentWeatherResponse = await _dio.get(
+        "weather",
+        queryParameters: {
+          "q": city,
+          "units": "metric",
+        },
+      );
+      final forecastResponse =
+          await _dio.get("forecast", queryParameters: {"q": city});
+
+      print("Weather Data: ${currentWeatherResponse.data}"); // Debugging
+
+      setState(() {
+        _weather = Weather(currentWeatherResponse.data);
+        _forecast = forecastResponse.data["list"];
+      });
+    } catch (e) {
+      print("Error: $e");
+    }
+
+    print("Weather Object: $_weather");
+    print("Temperature in _weather: ${_weather?.temperature?.celsius}");
+  }
 
   @override
   void initState() {
     super.initState();
-    _weatherFactory.currentWeatherByCityName("Buenos Aires").then((weather) {
-      setState(() {
-        _weather = weather;
-      });
-    });
+    fetchWeather("Maribor");
   }
 
   @override
@@ -79,30 +111,19 @@ class _HomePageState extends State<HomePage> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.04,
+            height: 10,
           ),
-          _userUid(),
-          _signOutButton(),
-          SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.06,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [_userUid(), _signOutButton()],
           ),
+          _searchBar(),
           _locationHeader(),
-          SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.06,
-          ),
           _dateTimeInfo(),
-          SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.05,
-          ),
           _weatherIcon(),
-          SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.02,
-          ),
           _currentTemp(),
-          SizedBox(
-            height: MediaQuery.sizeOf(context).height * 0.02,
-          ),
           _extraInfo(),
+          _forecastList(),
         ],
       ),
     );
@@ -180,8 +201,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _currentTemp() {
+    final double? temp = (_weather?.temperature?.celsius)! + 273;
+
     return Text(
-      "${_weather?.temperature?.celsius?.toStringAsFixed(0)}°C",
+      "${temp!.toStringAsFixed(0)}°C",
       style: const TextStyle(
         color: Colors.black,
         fontSize: 80,
@@ -191,6 +214,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _extraInfo() {
+    final double? maxtemp = (_weather?.tempMax?.celsius)! + 273;
+    final double? mintemp = (_weather?.tempMin?.celsius)! + 273;
     return Container(
       height: MediaQuery.sizeOf(context).height * 0.15,
       width: MediaQuery.sizeOf(context).width * 0.80,
@@ -209,14 +234,14 @@ class _HomePageState extends State<HomePage> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Text(
-                "Max: ${_weather?.tempMax?.celsius?.toStringAsFixed(0)}°C",
+                "Max: ${maxtemp?.toStringAsFixed(0)}°C",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 15,
                 ),
               ),
               Text(
-                "Min: ${_weather?.tempMin?.celsius?.toStringAsFixed(0)}°C",
+                "Min: ${mintemp?.toStringAsFixed(0)}°C",
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 15,
@@ -249,26 +274,86 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
-}
 
-/**
- scaffold po koncanem zgolj auth functionalityju
-return Scaffold(
-      appBar: AppBar(
-        title: _title(),
-      ),
-      body: Container(
-        height: double.infinity,
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            _userUid(),
-            _signOutButton(),
-          ],
-        ),
+  Widget _searchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _cityController,
+              decoration: const InputDecoration(
+                labelText: "Enter city name",
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: () {
+              fetchWeather(_cityController.text);
+            },
+            icon: Icon(Icons.search),
+          ),
+        ],
       ),
     );
- */
+  }
+
+  Widget _forecastList() {
+    if (_forecast == null) return SizedBox();
+
+    return Expanded(
+      child: ListView.builder(
+        itemCount: _forecast!.length,
+        itemBuilder: (context, index) {
+          final item = _forecast![index];
+          final date =
+              DateFormat("EEEE, d.MM").format(DateTime.parse(item["dt_txt"]));
+          final temp = item["main"]["temp"];
+          final description = item["weather"][0]["description"];
+          final iconCode = item["weather"][0]["icon"]; // Icon code from API
+          return ListTile(
+            title: Text("$date: ${temp.toStringAsFixed(0)}°C"),
+            subtitle: Text(description),
+            trailing: Image.network(
+              "https://openweathermap.org/img/wn/$iconCode@2x.png",
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/*
+image: NetworkImage(
+                    "https://openweathermap.org/img/wn/${_weather?.weatherIcon}@4x.png"))
+children: [
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.04,
+          ),
+          _userUid(),
+          _signOutButton(),
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.06,
+          ),
+          _locationHeader(),
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.06,
+          ),
+          _dateTimeInfo(),
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.05,
+          ),
+          _weatherIcon(),
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.02,
+          ),
+          _currentTemp(),
+          SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.02,
+          ),
+          _extraInfo(),
+        ],
+*/
